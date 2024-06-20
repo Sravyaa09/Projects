@@ -1,0 +1,208 @@
+---
+title: "Project"
+author: "Sushohit_Lutade"
+date: "2022-12-12"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r}
+library(car)
+library(GGally)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(conf)
+library(stargazer)
+library(ggcorrplot)
+TMDB_Movies <- read.csv("C:/Users/pavan/Downloads/TMDB_10000_Popular_Movies (1).csv")
+str(TMDB_Movies)
+#create new column to calculate net profit for each movie
+TMDB_Movies$Net_profit <- TMDB_Movies$Revenue - TMDB_Movies$Budget 
+
+#We will drop the columns that won't be used for our analysis, drop the missing value
+# convert date to year and numeric format for analysis
+TMDB_Movies$Release_Year<-as.numeric(format(as.Date(TMDB_Movies$Release_Date, format="%Y-%m-%d"),"%Y"))
+TMDB_Movies<-TMDB_Movies %>% relocate(Release_Year, .after=Rating_Count)
+
+# Drop columns that won't be used in our analysis-- Removed string colums and not related column removed
+Movies <- subset(TMDB_Movies, select = -c(Title,Genres,IMDb_Id,Original_Title,Overview, Cast,Crew,Original_Language, Collection ,Tagline,Release_Status,Languages_Spoken,Production_Companies,Country_of_Origin,Release_Date))
+str(Movies)
+
+# Drop the missing value at columns
+Movies<- drop_na(Movies)
+
+# remove row with 0 values in budget and revenue.
+Movies <- subset(Movies,Budget !=0)
+Movies <- subset(Movies,Revenue !=0)
+
+```
+
+````{r}
+#Most movies released in which quarter?
+TMDB_Movies$Release_Month<-as.numeric(format(as.Date(TMDB_Movies$Release_Date, format="%Y-%m-%d"),"%m"))
+TMDB_Movies$Release_Day<-as.numeric(format(as.Date(TMDB_Movies$Release_Date, format="%Y-%m-%d"),"%d"))
+Movies_qtr <- subset(TMDB_Movies, select = -c(TMDb_Id,IMDb_Id,Runtime,Rating_Count ,Original_Title,Overview, Cast,Crew,Original_Language, Collection ,Tagline,Release_Status,Languages_Spoken,Production_Companies,Country_of_Origin))
+
+movies.tb1 <- Movies_qtr %>%
+  mutate(thtr_date = make_date(Release_Year,Release_Month,Release_Day),
+         thtr_quat = quarter(thtr_date))
+temp1 <- movies.tb1 %>%
+  group_by(thtr_quat) %>%
+  summarise(num_quat=n()) %>%
+  mutate(label_y = cumsum(num_quat) - 0.5*num_quat)
+
+ggplot(data=temp1, aes(x=thtr_quat,y=num_quat)) + ylab("Films Number") + xlab("Quarter")+
+  geom_bar(stat="identity", fill="steelblue")+ 
+  theme_minimal()+geom_text(aes(label=num_quat),vjust=15, color="white", size=2)
+
+```
+
+
+```{r}
+
+# Drop columns that won't be used in our analysis
+Movies_title <- subset(TMDB_Movies, select = -c(TMDb_Id,Genres,IMDb_Id,Runtime,Rating_Count ,Original_Title,Overview, Cast,Crew,Original_Language, Collection ,Tagline,Release_Status,Languages_Spoken,Production_Companies,Country_of_Origin,Release_Date))
+
+#: What is the top 10 most profitable movies?
+Profitable<- Movies_title[with(Movies_title,order(-Net_profit)),]
+Profitable <- Profitable[1:10,]
+Profitable$ROI = Profitable$Net_profit/Profitable$Budget
+Profitable<- subset(Profitable, select = -c(Release_Day, Release_Month))
+View(Profitable)
+
+```
+
+
+```{r}
+
+# Drop columns that won't be used in our analysis
+Movies_genres <- subset(TMDB_Movies, select = -c(TMDb_Id,IMDb_Id,Runtime,Rating_Count ,Original_Title,Overview, Cast,Crew,Original_Language, Collection ,Tagline,Release_Status,Languages_Spoken,Production_Companies,Country_of_Origin,Release_Date))
+
+
+# Top 10 highest grossing Genres
+# group the genre and convert revenue,profit,budget in 1 billion unit
+Movies_genres1 <- separate_rows(Movies_genres, Genres, convert = TRUE)
+Revenue <- drop_na(Movies_genres1 %>% group_by(Genres)%>%
+                     summarise(Budget= sum(Budget)/100000000,Revenue= sum(Revenue)/100000000,Net_profit=sum(Net_profit)/100000000,Popularity = mean(Popularity)))
+
+# sort by highest revenue
+
+Revenue<- Revenue[order(-Revenue$Net_profit),]
+View(Revenue[1:15,])
+
+```
+
+```{r}
+
+
+#What release season is the peak season that can bring the most profit?
+#create genre list
+
+
+# group by year again and get the largest value
+df_Genre = Movies_genres1 %>% group_by(Release_Year)  %>%
+  summarise(Release_Year,Genres,
+            Popularityavg = mean(Popularity),
+            .groups = 'drop')
+df_Genre<-drop_na(df_Genre[!duplicated(df_Genre$Release_Year), ])
+
+#scatter plot and heatmap to visualize the most popular genre of each year.
+
+p<-ggplot(df_Genre,aes(y=Popularityavg,x=Release_Year,col=Genres))+geom_point(size = 2)
+p +scale_x_continuous(minor_breaks = seq(1900, 2022, 1)) +
+  scale_y_continuous(minor_breaks = seq(0, 25, 1))
+
+```
+
+
+```{r}
+#What kinds of properties are associated with movies that have high Profits?
+r <- cor(Movies, use="complete.obs")
+round(r,2)
+ggcorrplot(r)
+
+ggcorrplot(r, 
+           hc.order = TRUE, 
+           type = "lower",
+           lab = TRUE)
+```
+
+```{r}
+#####
+#Histogram for Popularity
+####
+
+hist(Movies_genres$Popularity, breaks = 100,xlim = c(0, 100))
+summary(Movies_genres$Popularity)
+
+#######################################
+#Hypothesis test
+#######################################
+
+Movies$Pop <- ifelse(Movies$Popularity <= 20, 0, 1)
+
+##Checking normality
+
+## Sample 1 : Popularity <= 20
+qqnorm(Movies$Net_profit[Movies$Pop == 0])
+qqline(Movies$Net_profit[Movies$Pop == 0])
+
+## Sample 2 : Popularity >20
+qqnorm(Movies$Net_profit[Movies$Pop == 1])
+qqline(Movies$Net_profit[Movies$Pop == 1])
+
+var.test(Net_profit ~ Pop, Movies)
+
+#H0:Mean profit for movies with popularity less than 20 = Mean profit for movies with popularity more than 20
+
+#H1:Mean Revenue for movies with popularity less than 20 != Mean Revenue for movies with popularity more than 20
+
+t.test(Net_profit ~ Pop, Movies, var.equal = FALSE)
+
+#Since p value <0.05, we reject the null hypothesis
+
+plot((Net_profit/1000000000)~Pop,data = Movies,xlab = "Popularity",ylab = "Net Profit(in Billons)",pch=19)
+
+#The values of Net Profit are in billions
+
+```
+
+````{r}
+############################
+#Regression models
+############################
+  
+
+linear <- lm(Net_profit~Runtime+Rating_average+Popularity+Budget+Release_Year+Rating_Count, data = Movies)
+summary(linear)
+
+```
+
+```{r}
+#as runtime and rating average are not significant we will drop the columns from our regression testing
+
+linear1 <- lm(Net_profit~Popularity+Budget+Release_Year+Rating_Count, data = Movies)
+summary(linear1)
+
+
+
+```
+
+```{r}
+
+#Construct regression models and present the results(Stargazer)
+stargazer(linear,linear1, 
+          type="html",
+          digits = 3,
+          se = Movies,
+          title = "Linear Panel Regression Models for Movies",
+          out="f_models_r2.htm")
+
+
+```
+
+
